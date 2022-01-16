@@ -25,7 +25,7 @@ namespace _113graph
       expr = "1.0";
       trackballButton = MouseButtons.Left;
 
-      name = "Josef Pelikán";
+      name = "Matěj Mrázek";
     }
 
     /// <summary>
@@ -98,7 +98,8 @@ namespace _113graph
       GL.ClearColor( Color.FromArgb( 14, 20, 40 ) );    // darker "navy blue"
       GL.Enable( EnableCap.DepthTest );
       GL.Enable( EnableCap.VertexProgramPointSize );
-      GL.ShadeModel( ShadingModel.Flat );
+      //GL.Enable()
+      GL.ShadeModel( ShadingModel.Smooth );
 
       // VBO init:
       VBOid = new uint[ 2 ];           // one big buffer for vertex data, another buffer for tri/line indices
@@ -145,36 +146,15 @@ namespace _113graph
         yMax = Math.Max( yMin + 1.0e-6, dom[ 3 ] );
       }
 
-      // Expression evaluation (THIS HAS TO BE CHANGED):
-      double x = 0.0, z = 1.0;
-      Expression e = null;
-      double result;
-      try
-      {
-        e = new Expression( expr );
-        e.Parameters[ "x" ] = x;
-        e.Parameters[ "y" ] = z;
-        e.Parameters[ "z" ] = z;
-        result = (double)e.Evaluate();
-        if ( double.IsNaN( result ) )
-          throw new Exception( "NCalc: NaN" );
-      }
-      catch ( Exception ex )
-      {
-        return ex.Message;
-      }
-
-      // Everything seems to be OK:
-      expression = expr;
-      param      = par;
-      Vector3  v = new Vector3( (float)x, (float)result, (float)z );
+      int resolution_x = 100;
+      int resolution_y = 100;
 
       // Data for VBO:
       useColors = true;
       useNormals = false;
       stride = Vector3.SizeInBytes * (1 + (useColors ? 1 : 0) + (useNormals ? 1 : 0));
-      long newVboSize = stride * 3;     // pilot .. three vertices
-      vertices = 3;                     // pilot .. three indices
+      long newVboSize = stride * (resolution_x + 1) * (resolution_y + 1);     // pilot .. three vertices
+      vertices = 6 * resolution_x * resolution_y;                     // pilot .. three indices
       long newIndexSize = sizeof( uint ) * vertices;
 
       // OpenGL stuff
@@ -193,35 +173,79 @@ namespace _113graph
       }
 
       IntPtr videoMemoryPtr = GL.MapBuffer( BufferTarget.ArrayBuffer, BufferAccess.WriteOnly );
+
+
+      double func_min = double.PositiveInfinity;
+      double func_max = double.NegativeInfinity;
+
+      Expression e = new Expression(expr);
+
+      double scale(int i, int steps, double min, double max) => min + (max - min) * i / steps;
+
+      double[,,] function_values = new double[resolution_x+1,resolution_y+1,3];
+      for (int x_i = 0; x_i <= resolution_x; x_i++)
+      {
+        double x = scale(x_i, resolution_x, xMin, xMax);
+        for (int y_i = 0; y_i <= resolution_y; y_i++)
+        {
+          double y = scale(y_i, resolution_y, yMin, yMax);
+          
+          double result;
+          try
+          {
+            e.Parameters["x"] = x;
+            e.Parameters["y"] = y;
+            e.Parameters["z"] = y;
+            result = (double)e.Evaluate();
+            function_values[x_i, y_i, 0] = x;
+            function_values[x_i, y_i, 1] = result;
+            function_values[x_i, y_i, 2] = y;
+
+            func_min = Math.Min(func_min, result);
+            func_max = Math.Max(func_max, result);
+
+            if (double.IsNaN(result))
+              throw new Exception("NCalc: NaN");
+          }
+          catch (Exception ex)
+          {
+            return ex.Message;
+          }
+        }
+      }
+
+
+
+
+      double ReLU (double x) => (x < 0) ? 0 : x;
+
       unsafe
       {
         float* ptr = (float*)videoMemoryPtr.ToPointer();
-        // !!! TODO: you need to change this part (only one triangle is defined here) !!!
-        float r = 0.1f;
-        float g = 0.9f;
-        float b = 0.5f;
 
-        *ptr++ = r;
-        *ptr++ = g;
-        *ptr++ = b;
-        *ptr++ = v.X;
-        *ptr++ = v.Y;
-        *ptr++ = v.Z;
+        for (int x_i = 0; x_i <= resolution_x; x_i++)
+        {
+          for (int y_i = 0; y_i <= resolution_y; y_i++)
+          {
+            double y_norm = (function_values[x_i, y_i, 1] - func_min) / (func_max - func_min);
 
-        *ptr++ = r;
-        *ptr++ = g;
-        *ptr++ = b;
-        *ptr++ = v.X + 1.0f;
-        *ptr++ = v.Y;
-        *ptr++ = v.Z;
+            *ptr++ = (float)(1 - ReLU(2 * y_norm - 1));
+            *ptr++ = (float)(1 - ReLU(1 - 2 * y_norm));
+            *ptr++ = (float)0;
 
-        *ptr++ = r;
-        *ptr++ = g;
-        *ptr++ = b;
-        *ptr++ = v.X;
-        *ptr++ = v.Y;
-        *ptr++ = v.Z + 1.0f;
+            *ptr++ = (float)function_values[x_i, y_i, 0];
+            *ptr++ = (float)function_values[x_i, y_i, 1];
+            *ptr++ = (float)function_values[x_i, y_i, 2];
+          }
+        }
       }
+      
+      // Everything seems to be OK:
+      expression = expr;
+      param = par;
+
+      Vector3  v = new Vector3( (float) scale(1, 2, xMin, xMax), (float)scale(1, 2, yMin, yMax), (float)scale(1, 2, yMin, yMax));
+
       GL.UnmapBuffer( BufferTarget.ArrayBuffer );
       GL.BindBuffer( BufferTarget.ArrayBuffer, 0 );
 
@@ -236,9 +260,24 @@ namespace _113graph
       videoMemoryPtr = GL.MapBuffer( BufferTarget.ElementArrayBuffer, BufferAccess.WriteOnly );
       unsafe
       {
+        uint coord(uint x, uint y)
+        {
+          return (uint) (y * (resolution_x + 1) + x);
+        }
         uint* ptr = (uint*)videoMemoryPtr.ToPointer();
-        for ( uint i = 0; i < 3; i++ )
-          *ptr++ = i;
+        for (uint x = 0; x < resolution_x; x++)
+        {
+          for (uint y = 0; y < resolution_y; y++)
+          {
+            *ptr++ = coord(x, y);
+            *ptr++ = coord(x+1, y);
+            *ptr++ = coord(x+1, y+1);
+
+            *ptr++ = coord(x, y);
+            *ptr++ = coord(x+1, y+1);
+            *ptr++ = coord(x, y+1);
+          }
+        }
       }
       GL.UnmapBuffer( BufferTarget.ElementArrayBuffer );
       GL.BindBuffer( BufferTarget.ElementArrayBuffer, 0 );

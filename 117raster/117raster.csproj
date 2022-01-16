@@ -137,6 +137,7 @@
       <Link>ModuleHSV\FormHSV.Designer.cs</Link>
       <DependentUpon>FormHSV.cs</DependentUpon>
     </Compile>
+    <Compile Include="ModulePaint\ModulePaint.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="FormMain.resx">

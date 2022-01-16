@@ -3,9 +3,47 @@ using System.Collections.Generic;
 using System.Drawing;
 using LineCanvas;
 using Utilities;
+using MathSupport;
+
 
 namespace _092lines
 {
+
+  class GloriousDraw
+  {
+    static double percent (int step, int step_count) => 1.0 * step / step_count;
+    static double angle (int step, int step_count, int shift=0) => 2 * Math.PI * percent(step + shift, step_count);
+    static double color (int step, int step_count, int shift) => 360 * percent(step + shift, step_count);
+
+
+    static void drawLine (Canvas c, int x, int y, double a1, double a2, double r1, double r2)
+    {
+      c.Line(x + Math.Sin(a1) * r1, y + Math.Cos(a1) * r1, x + Math.Sin(a2) * r2, y + Math.Cos(a2) * r2);
+    }
+    public static void DrawCircle (Canvas c, int x, int y, int steps, double r1, double r2, int color_hue_shift, int angle_shift_steps, double color_lightness)
+    {
+      for (int k = 0; k < steps; k++)
+      {
+        c.SetColor(Arith.HSVToColor(color(k, steps, color_hue_shift), 1.0, color_lightness));
+        double a = angle(k, steps);
+        drawLine(c, x, y, a, angle(k, steps, angle_shift_steps), r1, r2);
+        drawLine(c, x, y, a, angle(k, steps,-angle_shift_steps), r1, r2);
+      }
+    }
+
+    public static void DrawSpiral (Canvas c, int x, int y, int steps, double rdif, int color_hue_shift, int angle_shift_steps, int init_angle_steps, double color_lightness)
+    {
+      for (int k = 0; k < 10 * steps; k++)
+      {
+        c.SetColor(Arith.HSVToColor(color(k, steps, color_hue_shift), 1.0, color_lightness));
+        int ang_k = init_angle_steps + k;
+        double a = angle(ang_k, steps);
+        drawLine(c, x, y, a, angle(ang_k, steps, angle_shift_steps), k + rdif, k);
+        drawLine(c, x, y, a, angle(ang_k, steps,-angle_shift_steps), k + rdif, k);
+      }
+    }
+  }
+
   public class Lines
   {
     /// <summary>
@@ -21,20 +59,27 @@ namespace _092lines
       // {{
 
       // Put your name here.
-      name = "Josef Pelikán";
+      name = "Matěj Mrázek";
 
       // Image size in pixels.
-      wid = 800;
-      hei = 520;
+      wid = 2560;
+      hei = 1440;
 
       // Specific animation params.
-      param = "width=1.0,anti=true,objects=100,prob=0.95,seed=12";
+      param = "width=1.0,anti=true";
 
       // Tooltip = help.
-      tooltip = "width=<int>, anti[=<bool>], objects=<int>, hatches=<int>, prob=<float>, seed=<int>";
+      tooltip = "width=<int>, anti[=<bool>]";
 
       // }}
     }
+
+
+
+
+    
+
+
 
     /// <summary>
     /// Draw the image into the initialized Canvas object.
@@ -48,10 +93,6 @@ namespace _092lines
       // Input params.
       float penWidth = 1.0f;   // pen width
       bool antialias = false;  // use anti-aliasing?
-      int objects    = 100;    // number of randomly generated objects (squares, stars, Brownian particles)
-      int hatches    = 12;     // number of hatch-lines for the squares
-      double prob    = 0.95;   // continue-probability for the Brownian motion simulator
-      int seed       = 12;     // random generator seed
 
       Dictionary<string, string> p = Util.ParseKeyValueList(param);
       if (p.Count > 0)
@@ -66,170 +107,31 @@ namespace _092lines
         // anti[=<bool>]
         Util.TryParse(p, "anti", ref antialias);
 
-        // squares=<number>
-        if (Util.TryParse(p, "objects", ref objects) &&
-            objects < 0)
-          objects = 0;
-
-        // hatches=<number>
-        if (Util.TryParse(p, "hatches", ref hatches) &&
-            hatches < 1)
-          hatches = 1;
-
-        // prob=<probability>
-        if (Util.TryParse(p, "prob", ref prob) &&
-            prob > 0.999)
-          prob = 0.999;
-
-        // seed=<int>
-        Util.TryParse(p, "seed", ref seed);
       }
 
-      int wq = c.Width / 4;
-      int hq = c.Height / 4;
-      int wh = wq + wq;
-      int hh = hq + hq;
-      int minh = Math.Min(wh, hh);
-      double t;
-      int i, j;
-      double cx, cy, angle, x, y;
+      int c_wid = c.Width;
+      int c_hei = c.Height;
+      int c_siz = Math.Min(c_wid, c_hei);
 
       c.Clear(Color.Black);
-
-      // 1st quadrant - star.
-      c.SetPenWidth(penWidth);
       c.SetAntiAlias(antialias);
-
-      const int MAX_LINES = 30;
-      for (i = 0, t = 0.0; i < MAX_LINES; i++, t += 1.0 / MAX_LINES)
-      {
-        c.SetColor(Color.FromArgb(i * 255 / MAX_LINES, 255, 255 - i * 255 / MAX_LINES)); // [0,255,255] -> [255,255,0]
-        c.Line(t * wh, 0, wh - t * wh, hh);
-      }
-      for (i = 0, t = 0.0; i < MAX_LINES; i++, t += 1.0 / MAX_LINES)
-      {
-        c.SetColor(Color.FromArgb(255, 255 - i * 255 / MAX_LINES, i * 255 / MAX_LINES)); // [255,255,0] -> [255,0,255]
-        c.Line(0, hh - t * hh, wh, t * hh);
-      }
-
-      // 2nd quadrant - random hatched squares.
-      double size = minh / 10.0;
-      double padding = size * Math.Sqrt(0.5);
-      c.SetColor(Color.LemonChiffon);
-      c.SetPenWidth(1.0f);
-      Random r = (seed == 0) ? new Random() : new Random(seed);
-
-      for (i = 0; i < objects; i++)
-      {
-        do
-          cx = r.NextDouble() * wh;
-        while (cx < padding ||
-               cx > wh - padding);
-
-        c.SetAntiAlias(cx > wq);
-        cx += wh;
-
-        do
-          cy = r.NextDouble() * hh;
-        while (cy < padding ||
-               cy > hh - padding);
-
-        angle = r.NextDouble() * Math.PI;
-
-        double dirx = Math.Sin(angle) * size * 0.5;
-        double diry = Math.Cos(angle) * size * 0.5;
-        cx -= dirx - diry;
-        cy -= diry + dirx;
-        double dx = -diry * 2.0 / hatches;
-        double dy = dirx * 2.0 / hatches;
-        double linx = dirx + dirx;
-        double liny = diry + diry;
-
-        for (j = 0; j++ < hatches; cx += dx, cy += dy)
-          c.Line(cx, cy, cx + linx, cy + liny);
-      }
-
-      // 3rd quadrant - random stars.
-      c.SetColor(Color.LightCoral);
       c.SetPenWidth(penWidth);
-      size = minh / 16.0;
-      padding = size;
-      const int MAX_SIDES = 30;
-      List<PointF> v = new List<PointF>(MAX_SIDES + 1);
 
-      for (i = 0; i < objects; i++)
+
+      int largest_circle_r = (c_siz - 30);
+
+      for (float i = largest_circle_r; i > 10; i /= 1.1F)
       {
-        do
-          cx = r.NextDouble() * wh;
-        while (cx < padding ||
-               cx > wh - padding);
-
-        c.SetAntiAlias(cx > wq);
-
-        do
-          cy = r.NextDouble() * hh;
-        while (cy < padding ||
-               cy > hh - padding);
-        cy += hh;
-
-        int sides = r.Next(3, MAX_SIDES);
-        double dAngle = Math.PI * 2.0 / sides;
-
-        v.Clear();
-        angle = 0.0;
-
-        for (j = 0; j++ < sides; angle += dAngle)
-        {
-          double rad = size * (0.1 + 0.9 * r.NextDouble());
-          x = cx + rad * Math.Sin(angle);
-          y = cy + rad * Math.Cos(angle);
-          v.Add(new PointF((float)x, (float)y));
-        }
-        v.Add(v[0]);
-        c.PolyLine(v);
+        GloriousDraw.DrawCircle(c, c_wid / 2, c_hei / 2, 72, i, i / 1.1F, (int) i, 3, 0.25F);
       }
-
-      // 4th quadrant - Brownian motion.
-      c.SetPenWidth(penWidth);
-      c.SetAntiAlias(true);
-      size = minh / 10.0;
-      padding = size;
-
-      for (i = 0; i < objects; i++)
+      for (float i = 0; i < 4; i++)
       {
-        do
-          x = r.NextDouble() * wh;
-        while (x < padding ||
-               x > wh - padding);
-
-        do
-          y = r.NextDouble() * hh;
-        while (y < padding ||
-               y > hh - padding);
-
-        c.SetColor(Color.FromArgb(127 + r.Next(0, 128),
-                                  127 + r.Next(0, 128),
-                                  127 + r.Next(0, 128)));
-
-        for (j = 0; j++ < 1000;)
-        {
-          angle = r.NextDouble() * Math.PI * 2.0;
-          double rad = size * r.NextDouble();
-          cx = x + rad * Math.Sin(angle);
-          cy = y + rad * Math.Cos(angle);
-          if (cx < 0.0 || cx > wh ||
-              cy < 0.0 || cy > hh)
-            break;
-
-          c.Line(x + wh, y + hh, cx + wh, cy + hh);
-          x = cx;
-          y = cy;
-          if (r.NextDouble() > prob)
-            break;
-        }
+        GloriousDraw.DrawSpiral(c, c_wid / 2, c_hei / 2, 72, 10, (int) i + 100, 3, 18 * (int) i, 0.4F);
       }
-
-      // }}
+      for (float i = 20; i < largest_circle_r * 0.6; i *= 1.8F)
+      {
+        GloriousDraw.DrawCircle(c, c_wid / 2, c_hei / 2, 360, i, i / 1.2, 0, 45, 0.6);
+      }
     }
   }
 }

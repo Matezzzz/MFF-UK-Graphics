@@ -76,9 +76,9 @@ class vec3
     return new vec3(a.x + b.x, a.y + b.y, a.z + b.z);
   }
   public double dot(vec3 a)
-    {
+  {
     return a.x * x + a.y * y + a.z * z;
-    }
+  }
   public static vec3 operator *(vec3 a, vec3 b)
   {
     return new vec3(a.x * b.x, a.y * b.y, a.z * b.z);
@@ -197,7 +197,7 @@ class RayT
   {
     return a.t < b.t;
   }
-  public static bool operator>(RayT a, RayT b)
+  public static bool operator >(RayT a, RayT b)
   {
     return a.t > b.t;
   }
@@ -237,6 +237,9 @@ class GlobalConsts
   public static vec3 cam_dir = new vec3(10, 0, -2).normalize();
 
   public static double cam_angle_modifier = 0.3;
+
+  public static int sample_count = 5;
+  public static (double x, double y)[] sample_positions;
 }
 
 //func for reading vec3 of given name from params
@@ -313,19 +316,30 @@ formula.contextCreate = (in Bitmap input, in string param) =>
 
 
   //check whether any parameters are present
-  tryReadVec3  (p, "cam_pos",     ref GlobalConsts.cam_pos, new vec3(-10, -3, 1));
-  tryReadVec3  (p, "cam_dir",     ref GlobalConsts.cam_dir, new vec3(10, 0, -2));
-  tryReadDouble(p, "cam_fov",     ref GlobalConsts.cam_angle_modifier, 0.3);
-  tryReadDouble(p, "sphere_r",    ref Trace.sphere_radius, 1);
-  tryReadDouble(p, "sphere_m",    ref Trace.sphere_mass, 0.5);
+  tryReadVec3(p, "cam_pos", ref GlobalConsts.cam_pos, new vec3(-10, -3, 1));
+  tryReadVec3(p, "cam_dir", ref GlobalConsts.cam_dir, new vec3(10, 0, -2));
+  tryReadDouble(p, "cam_fov", ref GlobalConsts.cam_angle_modifier, 0.3);
+  tryReadDouble(p, "sphere_r", ref Trace.sphere_radius, 1);
+  tryReadDouble(p, "sphere_m", ref Trace.sphere_mass, 0.5);
   tryReadDouble(p, "light_speed", ref Trace.light_speed, 2);
-  tryReadDouble(p, "time_step",   ref Trace.time_step, 0.1);
-  tryReadDouble(p, "ring_r",      ref Trace.ring_radius, 10);
-  tryReadInt   (p, "trace_its",   ref Trace.max_iterations, 100);
+  tryReadDouble(p, "time_step", ref Trace.time_step, 0.1);
+  tryReadDouble(p, "ring_r", ref Trace.ring_radius, 10);
+  tryReadInt(p, "trace_its", ref Trace.max_iterations, 100);
+  tryReadInt(p, "sample_count", ref GlobalConsts.sample_count, 4);
+
+  Random r = new Random();
+  GlobalConsts.sample_positions = new (double, double)[GlobalConsts.sample_count];
+  for (int i = 0; i < GlobalConsts.sample_count; i++)
+  {
+    GlobalConsts.sample_positions[i] = (r.NextDouble(), r.NextDouble());
+  }
 
   //return tooltip info
   Dictionary<string, object> sc = new Dictionary<string, object>();
-  sc["tooltip"] = "-------------------BLACK HOLE RENDERER PARAMS-------------------\n" +
+
+  sc["tooltip"] = "-------------------ANTIALIASING-------------------\n" +
+                  "sample_count=<int> .. How many samples per pixel to use. Default is 4.\n" +
+                  "-------------------BLACK HOLE RENDERER PARAMS-------------------\n" +
                   "cam_pos=<float> <float> <float> .. position of camera in world coordinates. Black hole is at (0, 0, 0). Formatting example:\"cam_pos=3 7 8\". Default = (-10, -3, 1)\r" +
                   "cam_dir=<float> <float> <float> .. direction of camera in world coordinates. Default = (10, 0, -2)\n" +
                   "cam_fov=<float> .. Between positive float, represents field of view. FOV = 90 * coeff degrees. Default 0.3(27 degrees)\n" +
@@ -395,6 +409,33 @@ class RingsColor
   }
 };
 
+class BlackHole
+{
+  //directions up & right in camera viewport
+  static vec3 cam_right = new vec3(0, 0, 1).cross(GlobalConsts.cam_dir).normalize() * GlobalConsts.cam_angle_modifier;
+  static vec3 cam_up = cam_right.cross(GlobalConsts.cam_dir).normalize() * GlobalConsts.cam_angle_modifier;
+  public static vec3 computeColor(double scr_x, double scr_y, double ratio)
+  {
+    //compute current ray direction
+    vec3 ray = GlobalConsts.cam_dir.normalize() + cam_right * ratio * scr_x + cam_up * scr_y;
+
+    //trace light particle to determine which object will be hit and where
+    TracedT traced = Trace.intersectAnyTraced(GlobalConsts.cam_pos, ray);
+    if (traced.object_hit == Hittable.NONE) //if nothing was hit, set background to very dark blue
+    {
+      return new vec3(0, 0, 0.1);
+    }
+    else if (traced.object_hit == Hittable.SPHERE)  //if sphere was hit, set background to pure black
+    {
+      return new vec3(0, 0, 0);
+    }
+    else      //if ground(=the rings) was hit, compute it's color 
+    {
+      return RingsColor.computeColor(traced.pos);
+    }
+  }
+}
+
 formula.pixelCreate = (
   in ImageContext ic,
   out float R,
@@ -405,36 +446,20 @@ formula.pixelCreate = (
   //ratio of image width to height - used when creating camera
   double ratio = 1.0 * ic.width / ic.height;
 
-  //directions up & right in camera viewport
-  vec3 cam_right = new vec3(0, 0, 1).cross(GlobalConsts.cam_dir).normalize() * ratio * GlobalConsts.cam_angle_modifier;
-  vec3 cam_up = cam_right.cross(GlobalConsts.cam_dir).normalize() * GlobalConsts.cam_angle_modifier;
+  // [x, y] in [-1, 1]
 
 
-// [x, y] in [-1, 1]
-  double scr_x = ic.x / (double)Math.Max(1, ic.width - 1) * 2 - 1;
-  double scr_y = ic.y / (double)Math.Max(1, ic.height - 1) * 2 - 1;
-
-  //compute current ray direction
-  vec3 ray = GlobalConsts.cam_dir.normalize() + cam_right * scr_x + cam_up * scr_y;
-
-  //trace light particle to determine which object will be hit and where
-  TracedT traced = Trace.intersectAnyTraced(GlobalConsts.cam_pos, ray);
-  if (traced.object_hit == Hittable.NONE) //if nothing was hit, set background to very dark blue
+  vec3 color = new vec3(0, 0, 0);
+  foreach ((double x, double y) sp in GlobalConsts.sample_positions)
   {
-    R = 0F; G = 0F; B = 0.1F; return;
+    double scr_x = (ic.x + sp.x) / (double)Math.Max(1, ic.width - 1) * 2 - 1;
+    double scr_y = (ic.y + sp.y) / (double)Math.Max(1, ic.height - 1) * 2 - 1;
+    color = color + BlackHole.computeColor(scr_x, scr_y, ratio);
   }
-  else if (traced.object_hit == Hittable.SPHERE)  //if sphere was hit, set background to pure black
-  {
-    R = 0;
-    G = 0;
-    B = 0;
-  }
-  else      //if ground(=the rings) was hit, compute it's color 
-  {
-    vec3 color = RingsColor.computeColor(traced.pos);
-    R = (float)color.x;
-    G = (float)color.y;
-    B = (float)color.z;
-  }
+  color = color * (1 / (double)GlobalConsts.sample_count);
+
+  R = (float)color.x;
+  G = (float)color.y;
+  B = (float)color.z;
 };
 
